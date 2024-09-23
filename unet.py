@@ -23,7 +23,8 @@ class VAEBlock(nn.Module):
         infox = zdistr[:,2*self.latent_size:,:,:]
 
         epsilon = 0.01 # minimum area
-        area = torch.sigmoid(area)*(1-epsilon)
+        maxarea = 0.5 # maximum area
+        area = torch.sigmoid(area)*(maxarea-epsilon)
         area = epsilon+area
         mean = torch.maximum(mean, -1/2+area/2)
         mean = torch.minimum(mean, 1/2-area/2)
@@ -33,7 +34,8 @@ class VAEBlock(nn.Module):
         shape[1] = self.latent_size
         noise = torch.rand(shape, device = x.device)-1/2
         z = mean+area*noise# sample Z from zdistr
-        loss_z = torch.sum(-torch.log(area))# compute the conditional entropy 
+        loss_z = torch.sum(-torch.log(area), dim=(1,2,3))# compute the conditional entropy 
+        loss_z += torch.sqrt(torch.sum(mean**2, dim = (1,2,3)))
 
         inputunetx = torch.cat((z,r,infox),dim=1)
         diffx = self.unetmodifx(inputunetx)
@@ -95,7 +97,9 @@ class UNet_Res(nn.Module):
         x = self.unetin(x)
         i = 1
         for unet in self.unets:
-            x = x+unet(x)
+            res_input = (x-x.mean())/x.std()
+            res_output = unet(res_input)
+            res_output = (res_output-res_output.mean())/res_output.std()
             i+=1
         x = self.unetout(x)
         return x
@@ -121,9 +125,9 @@ class UNet(nn.Module):
 
 
     def forward(self, x):
-        x = (x-x.mean())/x.std()
         x11 = F.relu(self.conv11(x))
         x12 = self.conv12(x11)
+        x12 = (x12-x12.mean())/x12.std()
         x20 = F.interpolate(x12,scale_factor = 0.5)
         x21 = F.relu(self.conv21(x20))
         x22 = self.conv22(x21)
@@ -139,9 +143,26 @@ class UNet(nn.Module):
         xu11 = F.relu((xu10+x12)/math.sqrt(2))
         xu12 = F.relu(self.convu11(xu11))
         xu13 = F.relu(self.convu12(xu12))
-        xu13 = (xu13-xu13.mean())/xu13.std()
 
         out = self.convout(xu13)
         return out
+
+class Denoiser(nn.Module):
+    def __init__(self,noisy_input_channels, output_channels, depth = 3):
+        super(Denoiser, self).__init__()
+        self.unet_res = UNet_Res(noisy_input_channels,output_channels, depth = depth)
+    def forward(self,x):
+        x = self.unet_res(x)
+        return x
+
+class GenImage(nn.Module):
+    def __init__(self,input_channels, output_channels):
+        super(GenImage, self).__init__()
+        self.unet_res = UNet_Res(input_channels, output_channels, depth = 3)
+
+    def forward(self,x):
+        gen_im = self.unet_res(x)
+        gen_im = F.tanh(gen_im)
+        return gen_im
 
 

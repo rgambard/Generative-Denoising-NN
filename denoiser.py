@@ -5,40 +5,37 @@ import math
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from unet import UNet_Res, UNet, GenImage, Denoiser
+from unet import UNet_Res, UNet, Denoiser
 from utils import save_image, dotdict
 
 from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR
 
-def forward(data, model_gen, model_denoiser):
-    im = model_gen(data)
+def forward(data, model):
+    im = data
 
-    eps = 0.5+torch.rand(data.shape[0], device = data.device)*0.45
+    eps = torch.rand(data.shape[0], device = data.device)*0.95
     noise_in = torch.randn_like(im)
     im_input = eps[:,None,None,None]*noise_in+(1-eps[:,None,None,None])*im
     mod_input = torch.cat((im_input, eps[:,None,None,None].expand(im.shape)), dim=1)
 
-    gen_noise = model_denoiser(mod_input)
+    gen_noise = model(mod_input)
     im_corrected = 1/(1-eps[:,None,None,None])*(im_input-eps[:,None,None,None]*gen_noise)
 
     square_norm = torch.sum((im_corrected-im)**2,(2,3))
     loss = torch.sum(torch.sqrt(square_norm))
-    return loss, im, im_input, im_corrected
+    return loss, im_input, im_corrected
 
 
-def train(args, model_gen, model_denoiser, device, train_loader, optimizer, epoch):
-    model_denoiser.eval()
-    model_gen.train()
+def train(args, model, device, train_loader, optimizer, epoch):
+    model.train()
     running_loss = 0
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
      
         optimizer.zero_grad()
 
-        data = torch.randn_like(data)
-
-        loss, im, im_input,  im_corrected = forward(data, model_gen, model_denoiser)
+        loss, im_input, im_corrected= forward(data, model)
 
         loss.backward()
         running_loss += loss.item()
@@ -55,19 +52,15 @@ def train(args, model_gen, model_denoiser, device, train_loader, optimizer, epoc
                 break
 
 nid= "vnoise"
-def test(model_gen, model_denoiser, device, test_loader):
-    model_gen.eval()
-    model_denoiser.eval()
+def test(model, device, test_loader):
+    model.eval()
     test_loss = 0
     ctime = time.time()
     with torch.no_grad():
         for data, target in test_loader:
             data, target = data.to(device), target.to(device)
-
-            data = torch.randn_like(data)
-
-            loss, im, im_input,  corr= forward(data, model_gen, model_denoiser)
-
+            im = data
+            loss, im_input, corr= forward(data, model)
 
             test_loss += loss.item()
 
@@ -75,9 +68,9 @@ def test(model_gen, model_denoiser, device, test_loader):
     print('\nTest set {:.4f} Average loss: {:.4f} \n'.format(time.time()-ctime,test_loss))
     orig = im
     noisy = im_input
-    save_image(noisy[:10],"im/gen_noisy.jpg")
-    save_image(corr[:10],"im/gen_corrected.jpg")
-    save_image(orig[:10],"im/gen_originals.jpg")
+    save_image(noisy[:10],"im/noisy.jpg")
+    save_image(corr[:10],"im/corrected.jpg")
+    save_image(orig[:10],"im/originals.jpg")
 
 
 
@@ -117,20 +110,17 @@ def main():
     train_loader = torch.utils.data.DataLoader(dataset1,**train_kwargs)
     test_loader = torch.utils.data.DataLoader(dataset2, **test_kwargs)
 
-    model_denoiser = Denoiser(2,1,depth = 5).to(device)
-    model_gen = GenImage(1,1).to(device)
-    model_denoiser.load_state_dict(torch.load("denoiser.pt", weights_only=True))
-
-    optimizer = optim.Adam(model_gen.parameters(), lr=args.lr)
+    model = Denoiser(2,1,depth = 5).to(device)
+    optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
     scheduler = StepLR(optimizer, step_size=1, gamma=args.gamma)
     for epoch in range(1, args.epochs + 1):
-        train(args, model_gen, model_denoiser , device, train_loader, optimizer, epoch)
-        test(model_gen, model_denoiser,  device, test_loader)
+        train(args, model , device, train_loader, optimizer, epoch)
+        test(model,  device, test_loader)
         scheduler.step()
 
     if args.save_model:
-        torch.save(model_gen.state_dict(), "generator.pt")
+        torch.save(model.state_dict(), "denoiser.pt")
 
 
 if __name__ == '__main__':
