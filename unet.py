@@ -75,14 +75,3 @@ class Denoiser(nn.Module):
         x = self.unet_res(x)
         return x
 
-class GenImage(nn.Module):
-    def __init__(self,input_channels, output_channels):
-        super(GenImage, self).__init__()
-        self.unet_res = UNet_Res(input_channels, output_channels, depth = 3)
-
-    def forward(self,x):
-        gen_im = self.unet_res(x)
-        gen_im = F.tanh(gen_im)
-        return gen_im
-
-
