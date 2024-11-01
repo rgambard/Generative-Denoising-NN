@@ -9,21 +9,26 @@ from torch.optim.lr_scheduler import StepLR
 from utils import save_image , dotdict
 from unet import VAE
 
+timestep = 0
 def forward(model, data):
+    global timestep
     im = data
     noise = torch.randn_like(im)
     eps = torch.rand(data.shape[0], device = data.device)
-    #eps = eps*0
+    eps = eps*0
 
     im_in = (1-eps[:,None,None,None])*im+noise*eps[:,None,None,None]
     im_out, loss_z = model(im_in)
-    loss_im = torch.sum((im_in-im_out)**2, axis = (1,2,3))*10
-    loss = loss_im+loss_z
+    loss_im = torch.sum((im_in-im_out)**2, axis = (1,2,3))
+    value_z = max(0,min(1, (timestep-200)/1000))
+    timestep+=1
+    #print(value_z)
+    loss = loss_im+value_z*loss_z
     loss = loss*(1-eps)
     loss = torch.sum(loss)
     return im_in, im_out, loss, torch.sum(loss_im), torch.sum(loss_z)
 
-def train(args, model,  device, train_loader, optimizer, epoch):
+def train(args, model,  device, train_loader, optimizer_enc, optimizer_dec, epoch):
     model.train()
     mean_loss = 0
     mean_loss_im = 0
@@ -31,7 +36,8 @@ def train(args, model,  device, train_loader, optimizer, epoch):
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
      
-        optimizer.zero_grad()
+        optimizer_enc.zero_grad()
+        optimizer_dec.zero_grad()
 
         im_in, im_out, loss, loss_im, loss_z = forward(model, data)
         
@@ -40,7 +46,8 @@ def train(args, model,  device, train_loader, optimizer, epoch):
         mean_loss_z += loss_z.item()
         loss.backward()
 
-        optimizer.step()
+        optimizer_enc.step()
+        optimizer_dec.step()
 
         if (batch_idx+1) % args.log_interval == 0:
             mean_loss = mean_loss/(args.log_interval*data.shape[0])
@@ -90,7 +97,7 @@ def test(model, device, test_loader):
 
 def main():
     # Training settings
-    args_dict = {'batch_size' : 64, 'test_batch_size' : 1000, 'epochs' : 3, 'lr' : 0.0005, 'gamma' : 0.7, 'no_cuda' :False, 'dry_run':False, 'seed': 1, 'log_interval' : 100, 'save_model' :True}
+    args_dict = {'batch_size' : 64, 'test_batch_size' : 1000, 'epochs' : 10, 'lr' : 0.0005, 'gamma' : 0.9, 'no_cuda' :False, 'dry_run':False, 'seed': 1, 'log_interval' : 100, 'save_model' :True}
     args = dotdict(args_dict)
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
@@ -122,12 +129,13 @@ def main():
     train_loader = torch.utils.data.DataLoader(dataset1,**train_kwargs)
     test_loader = torch.utils.data.DataLoader(dataset2, **test_kwargs)
 
-    model = VAE(1,16,16,4, depth =1).to(device)
-    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    model = VAE(1,16,16,1, depth =1).to(device)
+    optimizer_enc = optim.Adam(model.encoderblocks.parameters(), lr=args.lr)
+    optimizer_dec = optim.Adam(model.decoderblocks.parameters(), lr=args.lr)
 
-    scheduler = StepLR(optimizer, step_size=1, gamma=args.gamma)
+    scheduler = StepLR(optimizer_enc, step_size=1, gamma=args.gamma)
     for epoch in range(1, args.epochs + 1):
-        train(args, model, device, train_loader, optimizer, epoch)
+        train(args, model, device, train_loader, optimizer_enc, optimizer_dec, epoch)
         test(model,  device, test_loader)
         scheduler.step()
 

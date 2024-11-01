@@ -7,35 +7,52 @@ from torchvision import datasets, transforms, utils
 from torch.optim.lr_scheduler import StepLR
 
 class VAEBlock(nn.Module):
-    def __init__(self, repr_size, input_size, latent_size):
+    def __init__(self, repr_size, input_size, latent_size, uniform = False):
         super(VAEBlock, self).__init__()
         self.latent_size = latent_size
-        self.unetin = UNet(repr_size+input_size, latent_size*2+input_size)
+        self.uniform = uniform
+        self.unetin = UNet(repr_size+input_size, 16)
+        self.unetin_sigma = UNet(16, latent_size)
+        self.unetin_mean = UNet(16, latent_size)
+        self.unetin_infox = UNet(16, input_size)
         self.unetmodifr = UNet(latent_size+repr_size, repr_size)
         self.unetmodifx = UNet(latent_size+repr_size+input_size,input_size)
+        self.encoderblocks = nn.ModuleList([self.unetin,self.unetin_mean, self.unetin_sigma, self.unetin_infox, self.unetmodifx])
+        self.decoderblocks = nn.ModuleList([self.unetmodifr])
 
     def forward(self, r, x): # r is the representation, x is the input
         input_unetin = torch.cat((r,x), dim = 1)
-        zdistr = self.unetin(input_unetin)
+        in_modif = self.unetin(input_unetin)
 
-        mean = zdistr[:,:self.latent_size,:,:]
-        area = zdistr[:,self.latent_size:2*self.latent_size,:,:]
-        infox = zdistr[:,2*self.latent_size:,:,:]
+        mean = self.unetin_mean(in_modif)
+        sigma = self.unetin_sigma(in_modif)
+        infox = self.unetin_infox(in_modif)
 
-        epsilon = 0.01 # minimum area
-        maxarea = 0.5 # maximum area
-        area = torch.sigmoid(area)*(maxarea-epsilon)
-        area = epsilon+area
-        mean = torch.maximum(mean, -1/2+area/2)
-        mean = torch.minimum(mean, 1/2-area/2)
-
-        #generating z from its moments and computing loss
+        minsigma = 0.01 # minimum sigma
+        maxsigma = 1 # maximum sigma
+        #mean = torch.sigmoid(mean)
+        sigma = torch.sigmoid(sigma)*(maxsigma-minsigma)
+        sigma = minsigma+sigma
         shape = list(x.shape)
         shape[1] = self.latent_size
-        noise = torch.rand(shape, device = x.device)-1/2
-        z = mean+area*noise# sample Z from zdistr
-        loss_z = torch.sum(-torch.log(area), dim=(1,2,3))# compute the conditional entropy 
-        loss_z += torch.sqrt(torch.sum(mean**2, dim = (1,2,3)))
+
+        if self.uniform:
+            mean = torch.maximum(mean, -1/2+sigma/2)
+            mean = torch.minimum(mean, 1/2-sigma/2)
+
+            #generating z from its moments and computing loss
+            noise = torch.rand(shape, device = x.device)-1/2
+            z = mean+sigma*noise# sample Z from zdistr
+            loss_z = torch.sum(-torch.log(sigma), dim=(1,2,3))# compute the conditional entropy 
+            loss_z += torch.sqrt(torch.sum(mean**2, dim = (1,2,3)))
+        else:
+            noise = torch.randn(shape, device = x.device)
+            z = mean+sigma*noise
+            #print(torch.mean(torch.sqrt(torch.sum(mean**2, dim = (1,2,3)))).item(),torch.mean(sigma**2, dim = (0,1,2,3)).item())
+            #print(torch.sqrt(torch.sum(mean**2,dim = (1,2,3))))
+            print(torch.sqrt(torch.sum(sigma**2,dim = (1,2,3))))
+            loss_z = 1/2*torch.sum(-2*torch.log(sigma)+mean**2+sigma**2, dim = (1,2,3))# compute the conditional entropy 
+
 
         inputunetx = torch.cat((z,r,infox),dim=1)
         diffx = self.unetmodifx(inputunetx)
@@ -48,20 +65,22 @@ class VAEBlock(nn.Module):
     def gen(self, r, temp = 1):
         shape = list(r.shape)
         shape[1] = self.latent_size
-        z = temp*(torch.rand(shape, device = r.device)-1/2)
+        z = temp*(torch.randn(shape, device = r.device))
         diffr = self.unetmodifr(torch.cat((z, r),dim=1))
         r = r+diffr
         return r
 
 
 class VAE(nn.Module):
-    def __init__(self, input_size, repr_size, inter_size, latent_size, depth=3):
+    def __init__(self, input_size, repr_size, inter_size, latent_size, depth=3, uniform = False): 
         super(VAE, self).__init__()
         self.repr_size = repr_size
 
         self.unetin = UNet(input_size, inter_size)
         self.unetout = UNet(repr_size, input_size)
-        self.vaeblocks = nn.ModuleList([VAEBlock(repr_size, inter_size, latent_size) for d in range(depth)])
+        self.vaeblocks = nn.ModuleList([VAEBlock(repr_size, inter_size, latent_size, uniform = uniform) for d in range(depth)])
+        self.encoderblocks = nn.ModuleList([self.unetin,]+[vaeblock.encoderblocks for vaeblock in self.vaeblocks])
+        self.decoderblocks = nn.ModuleList([self.unetout,]+[vaeblock.decoderblocks for vaeblock in self.vaeblocks])
 
     def forward(self,inp):
         x = self.unetin(inp)
@@ -127,7 +146,6 @@ class UNet(nn.Module):
     def forward(self, x):
         x11 = F.relu(self.conv11(x))
         x12 = self.conv12(x11)
-        x12 = (x12-x12.mean())/x12.std()
         x20 = F.interpolate(x12,scale_factor = 0.5)
         x21 = F.relu(self.conv21(x20))
         x22 = self.conv22(x21)
