@@ -12,19 +12,21 @@ from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR
 
 
-sigmas = torch.Tensor([0.01,0.2,0.5,0.8])
-lambdassigmas = sigmas**2
+sigmas = 5*torch.pow(torch.ones(20)*0.8,torch.arange(20))
+print(sigmas)
+
 
 def forward(data, model):
     im = data
 
     # parameters of the langevin dynamics steps
-    ind_randoms= torch.randint(0, sigmas.shape[0], data.shape[0], device = data.device)
+    ind_randoms= torch.randint(0, sigmas.shape[0], (data.shape[0],), device = data.device)
     sigmas_batch = sigmas[ind_randoms]
-    lambdas_batch = lambdassigmas[ind_randoms]
 
     noise_in = torch.randn_like(im)
-    im_input = sigmas_batch[:,None,None,None]*noise_in+im # noisy images
+    im_input = (sigmas_batch[:,None,None,None]*noise_in+im)
+    im_input_norm = torch.sqrt(torch.sum(im_input**2,dim=(1,2,3)))
+    im_input_renormalized = im_input/im_input_norm[:,None,None,None]
     # we append the sigmas to the model input as a new dimension of the image
     mod_input = torch.cat((im_input, sigmas_batch[:,None,None,None].expand(im.shape)), dim=1)
 
@@ -33,9 +35,9 @@ def forward(data, model):
     # corrected image using the score expression
     im_corrected = im_input+sigmas_batch[:,None,None,None]**2*pred_score
 
-    score = noise_in/sigmas_batch[:,None,None,None]**2
+    score = -noise_in/sigmas_batch[:,None,None,None]
     square_norm = torch.sum((pred_score -score)**2,(1,2,3)) # square norm of loss per image
-    loss = torch.sum(lambdas_batch*square_norm)
+    loss = torch.sum(sigmas_batch**2*square_norm)
     return loss, im_input, im_corrected
 
 
@@ -83,30 +85,36 @@ def test(model, device, test_loader):
     save_image(noisy[:10],"im/noisy.jpg")
     save_image(corr[:10],"im/corrected.jpg")
     save_image(orig[:10],"im/originals.jpg")
-    gen_shape = im.shape
+    gen_shape = list(im.shape)
     gen_shape[0] = 10
-    gen_im = sampleLangevin(model, device, im.shape)
-    save_image(gen_im)
+    gen_im = sampleLangevin(model, device, gen_shape)
+    save_image(gen_im, "im/generated.jpg")
 
 
-def sampleLangevin(model,device, im_shape, epsilon = 0.2, T=20):
+def sampleLangevin(model,device, im_shape, epsilon = 0.0004, T=100):
+    print("generating images...")
     with torch.no_grad():
-        xt = torch.randn(im_shape)
+        xt = torch.randn(im_shape, device = device)*(1+sigmas[0])
         for i in range(sigmas.shape[0]):
             sigmai = sigmas[i]
-            alpha = epsilon*sigmai**2/sigmas[-1]**2
+            alphai = epsilon*sigmai**2/sigmas[-1]**2
             for t in range(T):
-                zt = torch.randn(im_shape)
-                score = model(xt)
+                zt = torch.randn_like(xt)
+                xt_norm = torch.sqrt(torch.sum(xt**2,dim=(1,2,3)))
+                xt_renormalized= xt/xt_norm[:,None,None,None]
+                mod_input = torch.cat((xt,sigmai[None,None,None,None].expand(xt.shape)), dim=1)
+                score = model(mod_input)/sigmai
                 xt = xt + alphai/2*score+torch.sqrt(alphai)*zt
+    print("images generated ! ")
     return xt
 
 
 
 
 def main():
+    global sigmas
     # Training settings
-    args_dict = {'batch_size' : 64, 'test_batch_size' : 1000, 'epochs' : 5, 'lr' : 0.001, 'gamma' : 0.7, 'no_cuda' :False, 'dry_run':False, 'seed': 1, 'log_interval' : 200, 'save_model' :True}
+    args_dict = {'batch_size' : 64, 'test_batch_size' : 1000, 'epochs' : 15, 'lr' : 0.001, 'gamma' : 0.7, 'no_cuda' :False, 'dry_run':False, 'seed': 1, 'log_interval' : 200, 'save_model' :True, 'only_test':False, 'model_path':"denoiser.pt", 'load_model_from_disk':False}
     args = dotdict(args_dict)
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
@@ -139,17 +147,22 @@ def main():
     train_loader = torch.utils.data.DataLoader(dataset1,**train_kwargs)
     test_loader = torch.utils.data.DataLoader(dataset2, **test_kwargs)
 
-    model = Denoiser(2,1,depth = 1).to(device)
+    model = Denoiser(2,1,depth = 5).to(device)
+    if args.load_model_from_disk:
+        model.load_state_dict(torch.load(args.model_path, weights_only= True))
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
     scheduler = StepLR(optimizer, step_size=1, gamma=args.gamma)
+
+    sigmas = sigmas.to(device)
     for epoch in range(1, args.epochs + 1):
-        train(args, model , device, train_loader, optimizer, epoch)
+        if not args.only_test:
+            train(args, model , device, train_loader, optimizer, epoch)
+            scheduler.step()
         test(model,  device, test_loader)
-        scheduler.step()
 
     if args.save_model:
-        torch.save(model.state_dict(), "denoiser.pt")
+        torch.save(model.state_dict(), args.model_path)
 
 
 if __name__ == '__main__':
