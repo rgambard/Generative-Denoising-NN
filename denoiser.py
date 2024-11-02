@@ -12,7 +12,8 @@ from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR
 
 
-sigmas = 5*torch.pow(torch.ones(20)*0.8,torch.arange(20))
+sigmas = 5*torch.pow(torch.ones(10)*0.6,torch.arange(10))
+#sigmas = torch.linspace(5,0.01,15)
 print(sigmas)
 
 
@@ -25,8 +26,8 @@ def forward(data, model):
 
     noise_in = torch.randn_like(im)
     im_input = (sigmas_batch[:,None,None,None]*noise_in+im)
-    im_input_norm = torch.sqrt(torch.sum(im_input**2,dim=(1,2,3)))
-    im_input_renormalized = im_input/im_input_norm[:,None,None,None]
+    #im_input_norm = torch.sqrt(torch.sum(im_input**2,dim=(1,2,3)))
+    #im_input_renormalized = (im_input-torch.mean(im_input,dim=(1,2,3))[:,None,None,None])/im_input_norm[:,None,None,None]
     # we append the sigmas to the model input as a new dimension of the image
     mod_input = torch.cat((im_input, sigmas_batch[:,None,None,None].expand(im.shape)), dim=1)
 
@@ -91,7 +92,7 @@ def test(model, device, test_loader):
     save_image(gen_im, "im/generated.jpg")
 
 
-def sampleLangevin(model,device, im_shape, epsilon = 0.0004, T=100):
+def sampleLangevin(model,device, im_shape, epsilon = 25e-5, T=100):
     print("generating images...")
     with torch.no_grad():
         xt = torch.randn(im_shape, device = device)*(1+sigmas[0])
@@ -101,7 +102,7 @@ def sampleLangevin(model,device, im_shape, epsilon = 0.0004, T=100):
             for t in range(T):
                 zt = torch.randn_like(xt)
                 xt_norm = torch.sqrt(torch.sum(xt**2,dim=(1,2,3)))
-                xt_renormalized= xt/xt_norm[:,None,None,None]
+                xt_renormalized= (xt-torch.mean(xt, dim=(1,2,3))[:,None,None,None])/xt_norm[:,None,None,None]
                 mod_input = torch.cat((xt,sigmai[None,None,None,None].expand(xt.shape)), dim=1)
                 score = model(mod_input)/sigmai
                 xt = xt + alphai/2*score+torch.sqrt(alphai)*zt
@@ -114,7 +115,7 @@ def sampleLangevin(model,device, im_shape, epsilon = 0.0004, T=100):
 def main():
     global sigmas
     # Training settings
-    args_dict = {'batch_size' : 64, 'test_batch_size' : 1000, 'epochs' : 15, 'lr' : 0.001, 'gamma' : 0.7, 'no_cuda' :False, 'dry_run':False, 'seed': 1, 'log_interval' : 200, 'save_model' :True, 'only_test':False, 'model_path':"denoiser.pt", 'load_model_from_disk':False}
+    args_dict = {'batch_size' : 64, 'test_batch_size' : 1000, 'epochs' :40, 'lr' : 0.001, 'gamma' : 0.9, 'no_cuda' :False, 'dry_run':False, 'seed': 1, 'log_interval' : 200, 'save_model' :True, 'only_test':False, 'model_path':"denoiser.pt", 'load_model_from_disk':False}
     args = dotdict(args_dict)
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 

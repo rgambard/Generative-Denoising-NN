@@ -17,10 +17,12 @@ class UNet_Res(nn.Module):
     def forward(self,x):
         x = self.unetin(x)
         i = 1
+        x = (x-x.mean())/x.std()
         for unet in self.unets:
             res_input = (x-x.mean())/x.std()
             res_output = unet(res_input)
             res_output = (res_output-res_output.mean())/res_output.std()
+            x = x+res_output
             i+=1
         x = self.unetout(x)
         return x
