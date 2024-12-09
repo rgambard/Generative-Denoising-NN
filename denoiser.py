@@ -12,7 +12,7 @@ from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR
 
 
-sigmas = 5*torch.pow(torch.ones(10)*0.6,torch.arange(10))
+sigmas = 5*torch.pow(torch.ones(12)*0.6,torch.arange(12))
 #sigmas = torch.linspace(5,0.01,15)
 print(sigmas)
 
@@ -147,7 +147,7 @@ def main():
     train_loader = torch.utils.data.DataLoader(dataset1,**train_kwargs)
     test_loader = torch.utils.data.DataLoader(dataset2, **test_kwargs)
 
-    model = Denoiser(4,1,depth = 3).to(device)
+    model = Denoiser(4,1,depth = 6).to(device)
     if args.load_model_from_disk:
         model.load_state_dict(torch.load(args.model_path, weights_only= True))
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
