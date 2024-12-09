@@ -115,7 +115,7 @@ def sampleLangevin(model,device, im_shape, epsilon = 25e-5, T=100):
 def main():
     global sigmas
     # Training settings
-    args_dict = {'batch_size' : 64, 'test_batch_size' : 1000, 'epochs' :40, 'lr' : 0.001, 'gamma' : 0.9, 'no_cuda' :False, 'dry_run':False, 'seed': 1, 'log_interval' : 200, 'save_model' :True, 'only_test':False, 'model_path':"denoiser.pt", 'load_model_from_disk':False}
+    args_dict = {'batch_size' : 64, 'test_batch_size' : 128, 'epochs' :40, 'lr' : 0.001, 'gamma' : 0.9, 'no_cuda' :False, 'dry_run':False, 'seed': 1, 'log_interval' : 200, 'save_model' :True, 'only_test':False, 'model_path':"denoiser.pt", 'load_model_from_disk':False}
     args = dotdict(args_dict)
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
@@ -136,19 +136,18 @@ def main():
         test_kwargs.update(cuda_kwargs)
 
     # loading dataset
-    transform=transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Pad(2),
-        transforms.Normalize((0.1307,), (0.3081,))
-        ])
-    dataset1 = datasets.MNIST('../data', train=True, download=True,
-                       transform=transform)
-    dataset2 = datasets.MNIST('../data', train=False,
-                       transform=transform)
+    transform = transforms.Compose([
+    transforms.Resize((128, 128)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+    ])
+
+    dataset1 = datasets.CelebA(root='data/celeba', split='train', download=True, transform=transform)
+    dataset2 = datasets.CelebA(root='data/celeba', split='test', download=True, transform=transform)
     train_loader = torch.utils.data.DataLoader(dataset1,**train_kwargs)
     test_loader = torch.utils.data.DataLoader(dataset2, **test_kwargs)
 
-    model = Denoiser(2,1,depth = 5).to(device)
+    model = Denoiser(2,1,depth = 3).to(device)
     if args.load_model_from_disk:
         model.load_state_dict(torch.load(args.model_path, weights_only= True))
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
@@ -166,5 +165,4 @@ def main():
         torch.save(model.state_dict(), args.model_path)
 
 
-if __name__ == '__main__':
-    main()
+main()
