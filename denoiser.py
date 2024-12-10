@@ -12,7 +12,7 @@ from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR
 
 
-sigmas = 5*torch.pow(torch.ones(10)*0.6,torch.arange(10))
+sigmas = 5*torch.pow(torch.ones(12)*0.6,torch.arange(12))
 #sigmas = torch.linspace(5,0.01,15)
 print(sigmas)
 
@@ -29,7 +29,7 @@ def forward(data, model):
     #im_input_norm = torch.sqrt(torch.sum(im_input**2,dim=(1,2,3)))
     #im_input_renormalized = (im_input-torch.mean(im_input,dim=(1,2,3))[:,None,None,None])/im_input_norm[:,None,None,None]
     # we append the sigmas to the model input as a new dimension of the image
-    mod_input = torch.cat((im_input, sigmas_batch[:,None,None,None].expand(im.shape)), dim=1)
+    mod_input = torch.cat((im_input, sigmas_batch[:,None,None,None].expand(im.shape[0],1,im.shape[2],im.shape[3])), dim=1)
 
     pred_score = model(mod_input)/sigmas_batch[:,None,None,None] # we divide by sigma such that the variance 
     # of the last layer is constant and equal to 1
@@ -103,7 +103,7 @@ def sampleLangevin(model,device, im_shape, epsilon = 25e-5, T=100):
                 zt = torch.randn_like(xt)
                 xt_norm = torch.sqrt(torch.sum(xt**2,dim=(1,2,3)))
                 xt_renormalized= (xt-torch.mean(xt, dim=(1,2,3))[:,None,None,None])/xt_norm[:,None,None,None]
-                mod_input = torch.cat((xt,sigmai[None,None,None,None].expand(xt.shape)), dim=1)
+                mod_input = torch.cat((xt,sigmai[None,None,None,None].expand(xt.shape[0],1,xt.shape[2],xt.shape[3])), dim=1)
                 score = model(mod_input)/sigmai
                 xt = xt + alphai/2*score+torch.sqrt(alphai)*zt
     print("images generated ! ")
@@ -115,7 +115,7 @@ def sampleLangevin(model,device, im_shape, epsilon = 25e-5, T=100):
 def main():
     global sigmas
     # Training settings
-    args_dict = {'batch_size' : 64, 'test_batch_size' : 128, 'epochs' :40, 'lr' : 0.001, 'gamma' : 0.9, 'no_cuda' :False, 'dry_run':False, 'seed': 1, 'log_interval' : 200, 'save_model' :True, 'only_test':False, 'model_path':"denoiser.pt", 'load_model_from_disk':False}
+    args_dict = {'batch_size' : 64, 'test_batch_size' : 128, 'epochs' :40, 'lr' : 0.001, 'gamma' : 0.97, 'no_cuda' :False, 'dry_run':False, 'seed': 1, 'log_interval' : 200, 'save_model' :True, 'only_test':False, 'model_path':"denoiser.pt", 'load_model_from_disk':False}
     args = dotdict(args_dict)
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
@@ -137,17 +137,17 @@ def main():
 
     # loading dataset
     transform = transforms.Compose([
-    transforms.Resize((128, 128)),
+    transforms.Resize((32,32)),
     transforms.ToTensor(),
-    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+    transforms.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261))#mean, std
     ])
 
-    dataset1 = datasets.CelebA(root='data/celeba', split='train', download=True, transform=transform)
-    dataset2 = datasets.CelebA(root='data/celeba', split='test', download=True, transform=transform)
+    dataset1 = datasets.CIFAR10(root='data/', train=True, download=True, transform=transform)
+    dataset2 = datasets.CIFAR10(root='data/', train=False, download=True, transform=transform)
     train_loader = torch.utils.data.DataLoader(dataset1,**train_kwargs)
     test_loader = torch.utils.data.DataLoader(dataset2, **test_kwargs)
 
-    model = Denoiser(2,1,depth = 3).to(device)
+    model = Denoiser(4,1,depth = 6).to(device)
     if args.load_model_from_disk:
         model.load_state_dict(torch.load(args.model_path, weights_only= True))
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
