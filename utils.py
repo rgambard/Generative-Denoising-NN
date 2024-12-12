@@ -3,8 +3,7 @@ from torchvision import utils
 from PIL import Image
 import time
 def save_image(im,name):
-    normalized = im-torch.min(im)
-    normalized = normalized/torch.max(normalized)
+    normalized = torch.clip(im, -20,20)
     utils.save_image(normalized,name)
 
 
