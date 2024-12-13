@@ -22,7 +22,7 @@ class UNet_Res(nn.Module):
             res_output = unet(res_input)
             x = x+res_output
             i+=1
-        x = (x-x.mean())/x.std()
+        x = (x-x.mean(dim=(1,2,3))[:,None,None,None])/x.std(dim=(1,2,3))[:,None,None,None]
         x = self.unetout(x)
         return x
         

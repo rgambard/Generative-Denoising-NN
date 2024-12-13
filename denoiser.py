@@ -100,7 +100,7 @@ def test(model, device, test_loader):
     save_image(gen_im, "im/generated.jpg")
 
 
-def sampleLangevin(model,device, im_shape, epsilon = 2e-5, T=30):
+def sampleLangevin(model,device, im_shape, epsilon = 1e-5, T=100):
     print("generating images...")
     with torch.no_grad():
         xt = torch.randn(im_shape, device = device)*torch.sqrt((1+sigmas[0]**2))
@@ -163,7 +163,7 @@ def main():
     train_loader = torch.utils.data.DataLoader(dataset1,**train_kwargs)
     test_loader = torch.utils.data.DataLoader(dataset2, **test_kwargs)
 
-    model = Denoiser(6,3,depth = 5).to(device)
+    model = Denoiser(6,3,depth = 3).to(device)
     if args.load_model_from_disk:
         model.load_state_dict(torch.load(args.model_path, weights_only= True))
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
