@@ -100,7 +100,7 @@ def test(model, device, test_loader):
     save_image(gen_im, "im/generated.jpg")
 
 
-def sampleLangevin(model,device, im_shape, epsilon = 1e-5, T=100):
+def sampleLangevin(model,device, im_shape, epsilon = 2e-5, T=30):
     print("generating images...")
     with torch.no_grad():
         xt = torch.randn(im_shape, device = device)*torch.sqrt((1+sigmas[0]**2))
