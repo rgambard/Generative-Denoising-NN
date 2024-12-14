@@ -119,6 +119,31 @@ class UNet(nn.Module):
         out = self.convout(xu14)
         return out
 
+class MixNet(nn.Module):
+    def __init__(self,int_channels =16):
+        super(ConvNet, self).__init__()
+        self.convl11 = nn.Conv2d(int_channels,int_channels, 3, 1, 1) # kernel, stride, padding
+        self.convl12 = nn.Conv2d(int_channels,int_channels, 3, 1, 1) # kernel, stride, padding
+        self.convl21 = nn.Conv2d(int_channels,int_channels, 3, 1, 1) # kernel, stride, padding
+        self.convl22 = nn.Conv2d(int_channels,int_channels, 3, 1, 1) # kernel, stride, padding
+        self.convl31 = nn.Conv2d(int_channels,int_channels, 3, 1, 1) # kernel, stride, padding
+        self.convl32 = nn.Conv2d(int_channels,int_channels, 3, 1, 1) # kernel, stride, padding
+        self.convl41 = nn.Conv2d(int_channels,int_channels, 3, 1, 1) # kernel, stride, padding
+        self.convl42 = nn.Conv2d(int_channels,int_channels, 3, 1, 1) # kernel, stride, padding
+
+    def mix(self,x,x1,x2,x3):
+        x1 += F.interpolate(x,x1.shape)
+        x2 += F.interpolate(x1,x2.shape)
+        x3 += F.interpolate(x2,x3.shape)
+        x4 += F.interpolate(x3,x4.shape)
+        pass
+    def forward(self, x, x1, x2, x3):
+        x += self.convl12(F.relu(self.conv11(x)))
+        x1 += self.convl22(F.relu(self.convl21(x1)))
+        x2 += self.convl31(F.relu(self.convl32(x2)))
+        x3 += self.convl41(F.relu(self.convl42(x3)))
+        return x, x1, x2, x3
+
 class Denoiser(nn.Module):
     def __init__(self,noisy_input_channels, output_channels, depth = 3):
         super(Denoiser, self).__init__()
@@ -127,3 +152,14 @@ class Denoiser(nn.Module):
         x = self.unet_res(x)
         return x
 
+class EnergyModel(nn.Module):
+    def __init__(self,noisy_input_channels, output_channels, depth = 3):
+        super(EnergyModel, self).__init__()
+        self.unet_res = UNet_Res(noisy_input_channels, 1, depth = depth)
+        self.output_channels = output_channels
+
+    def forward(self,samples):
+        samples.requires_grad_(True)
+        logp = self.unet_res(samples)
+        dlogp = torch.autograd.grad(logp.sum(), samples, create_graph=True)[0]
+        return dlogp[:,:self.output_channels,:,:]
