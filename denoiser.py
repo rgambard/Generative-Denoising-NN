@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from unet import UNet_Res, UNet, Denoiser, EnergyModel
+from metrics import preprocess_images , calculate_inception_score , InceptionV3
 from utils import save_image, dotdict
 
 from torchvision import datasets, transforms
@@ -70,7 +71,7 @@ def train(args, model, device, train_loader, optimizer, epoch):
                 break
 
 nid= "vnoise"
-def test(model, device, test_loader):
+def test(model, device, test_loader,calculate_inception = True):
     model.eval()
     test_loss = 0
     ctime = time.time()
@@ -94,6 +95,13 @@ def test(model, device, test_loader):
     gen_shape[0] = 64
     gen_im = sampleLangevin(model, device, gen_shape)
     save_image(gen_im, "im/generated.jpg")
+    if calculate_inception :
+        metrique = InceptionV3().to(device)
+        normalized = gen_im - torch.min(gen_im)
+        normalized = normalized / torch.max(normalized)
+        normalized = normalized.to(device)
+        mean,std = calculate_inception_score(normalized, metrique, gen_shape[0], splits=10)
+        print(f"Inception Score: {mean} ± {std}")
 
 def sampleLangevin(model,device, im_shape, epsilon = 0.02, T=1, temp = 1.):
     with torch.no_grad():
@@ -134,7 +142,6 @@ def main():
         device = torch.device("cuda")
     else:
         device = torch.device("cpu")
-
     train_kwargs = {'batch_size': args.batch_size}
     test_kwargs = {'batch_size': args.test_batch_size}
     if use_cuda:
@@ -160,18 +167,23 @@ def main():
     model = Denoiser(3,3,depth = 12).to(device)
     if args.load_model_from_disk:
         model.load_state_dict(torch.load(args.model_path, weights_only= True))
+        #model.load_state_dict(torch.load(args.model_path, map_location=torch.device('cpu')))
+
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
     scheduler = StepLR(optimizer, step_size=1, gamma=args.gamma)
 
     sigmas = sigmas.to(device)
-    for epoch in range(1, args.epochs + 1):
-        if not args.only_test:
-            train(args, model , device, train_loader, optimizer, epoch)
-            scheduler.step()
-            if args.save_model:
-                torch.save(model.state_dict(), args.model_path)
+    if args.only_test:
         test(model,  device, test_loader)
+    else :
+        for epoch in range(1, args.epochs + 1):
+            if not args.only_test:
+                train(args, model , device, train_loader, optimizer, epoch)
+                scheduler.step()
+                if args.save_model:
+                    torch.save(model.state_dict(), args.model_path)
+            test(model,  device, test_loader)
 
     if args.save_model:
         torch.save(model.state_dict(), args.model_path)
