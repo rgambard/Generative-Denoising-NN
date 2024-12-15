@@ -74,8 +74,8 @@ def test(model, device, test_loader):
     model.eval()
     test_loss = 0
     ctime = time.time()
-    #with torch.no_grad():
-    if True:
+    with torch.no_grad():
+    #if True:
         for data, target in test_loader:
             data, target = data.to(device), target.to(device)
             im = data
@@ -91,18 +91,18 @@ def test(model, device, test_loader):
     save_image(corr[:10],"im/corrected.jpg")
     save_image(orig[:10],"im/originals.jpg")
     gen_shape = list(im.shape)
-    gen_shape[0] = 32
+    gen_shape[0] = 64
     gen_im = sampleLangevin(model, device, gen_shape)
     save_image(gen_im, "im/generated.jpg")
 
-def sampleLangevin(model,device, im_shape, epsilon = 0.005, T=3, temp = 1.):
-    #with torch.no_grad():
-    if True:
+def sampleLangevin(model,device, im_shape, epsilon = 0.02, T=1, temp = 1.):
+    with torch.no_grad():
+    #if True:
         xt = torch.randn(im_shape, device = device)
         for i in range(0,sigmas.shape[0]):
-            mtemp = temp - (i/1300)**2
+            mtemp = temp - (i/1350)
             sigmai = sigmas[i]
-            alphai = epsilon
+            alphai = epsilon*sigmai
             for t in range(T):
                 zt = torch.randn_like(xt)
                 pred_score= model(xt).detach()
@@ -121,7 +121,7 @@ TEST = True# set to true to load model from disk and only generate to test lange
 def main():
     global sigmas
     # Training settings
-    args_dict = {'batch_size' : 64, 'test_batch_size' :64, 'epochs' :200, 'lr' : 0.0002, 'gamma' : 0.98, 'no_cuda' :False, 'dry_run':False, 'seed': 1, 'log_interval' : 200, 'save_model' :True, 'only_test':False, 'model_path':"denoiserenergy.pt", 'load_model_from_disk':False}
+    args_dict = {'batch_size' : 64, 'test_batch_size' :64, 'epochs' :200, 'lr' : 0.0002, 'gamma' : 0.98, 'no_cuda' :False, 'dry_run':False, 'seed': 1, 'log_interval' : 200, 'save_model' :True, 'only_test':False, 'model_path':"denoiserrenorm.pt", 'load_model_from_disk':False}
     if TEST:
         args_dict['load_model_from_disk'] = True
         args_dict['only_test'] = True
@@ -157,7 +157,7 @@ def main():
     train_loader = torch.utils.data.DataLoader(dataset1,**train_kwargs)
     test_loader = torch.utils.data.DataLoader(dataset2, **test_kwargs)
 
-    model = EnergyModel(3,3,depth = 5).to(device)
+    model = Denoiser(3,3,depth = 12).to(device)
     if args.load_model_from_disk:
         model.load_state_dict(torch.load(args.model_path, weights_only= True))
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
