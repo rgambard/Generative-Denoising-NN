@@ -8,7 +8,7 @@ from torch.optim.lr_scheduler import StepLR
 
             
 class UNet_Res(nn.Module):
-    def __init__(self,input_channels, output_channels, depth = 3, int_channels =32):
+    def __init__(self,input_channels, output_channels, depth = 3, int_channels = 64):
         super(UNet_Res, self).__init__()
         self.unetin = UNet(input_channels, int_channels, int_channels = int_channels)
         self.unetout = UNet(int_channels, output_channels, int_channels = int_channels)
@@ -153,7 +153,7 @@ class Denoiser(nn.Module):
         return x
 
 class EnergyModel(nn.Module):
-    def __init__(self,noisy_input_channels, output_channels, depth = 3):
+    def __init__(self,noisy_input_channels, output_channels, depth = 10):
         super(EnergyModel, self).__init__()
         self.unet_res = UNet_Res(noisy_input_channels, 1, depth = depth)
         self.output_channels = output_channels
