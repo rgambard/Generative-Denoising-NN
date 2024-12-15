@@ -5,7 +5,7 @@ import math
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from unet import UNet_Res, UNet, Denoiser, EnergyModel
+from unet import UNet_Res, UNet, Denoiser, EnergyModel, ResidualUNet
 from utils import save_image, dotdict
 
 from torchvision import datasets, transforms
@@ -13,7 +13,7 @@ from torch.optim.lr_scheduler import StepLR
 
 
 #sigmas = torch.pow(torch.ones(20)*0.8,torch.arange(20))
-sigmas = torch.linspace(1,0.01,1000)
+sigmas = torch.linspace(1,0.2,1000)
 #sigmas = torch.ones(1000)
 
 
@@ -95,14 +95,14 @@ def test(model, device, test_loader):
     gen_im = sampleLangevin(model, device, gen_shape)
     save_image(gen_im, "im/generated.jpg")
 
-def sampleLangevin(model,device, im_shape, epsilon = 0.02, T=1, temp = 1.):
+def sampleLangevin(model,device, im_shape, epsilon = 0.01, T=1, temp = 1.):
     with torch.no_grad():
     #if True:
         xt = torch.randn(im_shape, device = device)
         for i in range(0,sigmas.shape[0]):
-            mtemp = temp - (i/1350)
+            mtemp = temp - (i/1300)**2
             sigmai = sigmas[i]
-            alphai = epsilon*sigmai
+            alphai = epsilon#*sigmai
             for t in range(T):
                 zt = torch.randn_like(xt)
                 pred_score= model(xt).detach()
@@ -116,12 +116,12 @@ def sampleLangevin(model,device, im_shape, epsilon = 0.02, T=1, temp = 1.):
 
 
 
-TEST = True# set to true to load model from disk and only generate to test langevin
+TEST = False# set to true to load model from disk and only generate to test langevin
 
 def main():
     global sigmas
     # Training settings
-    args_dict = {'batch_size' : 64, 'test_batch_size' :64, 'epochs' :200, 'lr' : 0.0002, 'gamma' : 0.98, 'no_cuda' :False, 'dry_run':False, 'seed': 1, 'log_interval' : 200, 'save_model' :True, 'only_test':False, 'model_path':"denoiserrenorm.pt", 'load_model_from_disk':False}
+    args_dict = {'batch_size' : 64, 'test_batch_size' :64, 'epochs' :200, 'lr' : 0.0002, 'gamma' : 0.98, 'no_cuda' :False, 'dry_run':False, 'seed': 1, 'log_interval' : 200, 'save_model' :True, 'only_test':False, 'model_path':"denoisermnist.pt", 'load_model_from_disk':False}
     if TEST:
         args_dict['load_model_from_disk'] = True
         args_dict['only_test'] = True
@@ -145,19 +145,19 @@ def main():
         test_kwargs.update(cuda_kwargs)
 
     # loading dataset
-    transform = transforms.Compose([
-    transforms.Resize((32,32)),
-    transforms.ToTensor(),
-    transforms.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261)),#mean, std
-    transforms.RandomHorizontalFlip(p=0.5)
+    transform=transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Pad(2),
+        transforms.Normalize((0.1307,), (0.3081,))
     ])
-
-    dataset1 = datasets.CIFAR10(root='data/', train=True, download=True, transform=transform)
-    dataset2 = datasets.CIFAR10(root='data/', train=False, download=True, transform=transform)
+    dataset1 = datasets.MNIST('../data', train=True, download=True,
+    transform=transform)
+    dataset2 = datasets.MNIST('../data', train=False,
+    transform=transform)
     train_loader = torch.utils.data.DataLoader(dataset1,**train_kwargs)
     test_loader = torch.utils.data.DataLoader(dataset2, **test_kwargs)
 
-    model = Denoiser(3,3,depth = 12).to(device)
+    model = ResidualUNet(1,1).to(device)
     if args.load_model_from_disk:
         model.load_state_dict(torch.load(args.model_path, weights_only= True))
     optimizer = optim.Adam(model.parameters(), lr=args.lr)

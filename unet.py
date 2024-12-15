@@ -8,24 +8,90 @@ from torch.optim.lr_scheduler import StepLR
 
             
 class UNet_Res(nn.Module):
-    def __init__(self,input_channels, output_channels, depth = 3, int_channels = 64):
+    def __init__(self,input_channels, output_channels, depth = 3, int_channels = 32):
         super(UNet_Res, self).__init__()
-        self.unetin = UNet(input_channels, int_channels, int_channels = int_channels)
-        self.unetout = UNet(int_channels, output_channels, int_channels = int_channels)
-        self.unets = nn.ModuleList([UNet(int_channels, int_channels, int_channels=int_channels) for i in range(depth)])
+        #self.unetin = UNet(input_channels, int_channels, int_channels = int_channels)
+        #self.unetout = UNet(int_channels, output_channels, int_channels = int_channels)
+        #self.unets = nn.ModuleList([UNet(int_channels, int_channels, int_channels=int_channels) for i in range(depth)])
+        self.unetin = ResidualUNet(3,int_channels)
+        self.unets = nn.ModuleList([ResidualUNet(int_channels, int_channels) for i in range(depth)])
+        self.unetout = ResidualUNet(int_channels,3)
 
     def forward(self,x):
         x = self.unetin(x)
         i = 1
         for unet in self.unets:
-            res_input = (x-x.mean(dim=(1,2,3))[:,None,None,None])/x.std(dim=(1,2,3))[:,None,None,None]
+            #res_input = (x-x.mean(dim=(1,2,3))[:,None,None,None])/x.std(dim=(1,2,3))[:,None,None,None]
+            res_input = x
             res_output = unet(res_input)
             x = x+res_output
             i+=1
-        x = (x-x.mean(dim=(1,2,3))[:,None,None,None])/x.std(dim=(1,2,3))[:,None,None,None]
+        #x = (x-x.mean(dim=(1,2,3))[:,None,None,None])/x.std(dim=(1,2,3))[:,None,None,None]
         x = self.unetout(x)
         return x
-        
+
+class ResidualBlock(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(ResidualBlock, self).__init__()
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        self.relu = nn.ReLU(inplace=True)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(out_channels)
+        self.skip = nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=False) if in_channels != out_channels else nn.Identity()
+
+    def forward(self, x):
+        residual = self.skip(x)
+        x = self.relu(self.bn1(self.conv1(x)))
+        x = self.bn2(self.conv2(x))
+        return self.relu(x + residual)
+
+
+class ResidualUNet(nn.Module):
+    def __init__(self, input_channels=3, output_channels=3):
+        super(ResidualUNet, self).__init__()
+
+        # Encoder
+        self.enc1 = ResidualBlock(input_channels, 64)
+        self.enc2 = ResidualBlock(64, 128)
+        self.enc3 = ResidualBlock(128, 256)
+        self.enc4 = ResidualBlock(256, 512)
+
+        # Decoder
+        self.dec3 = ResidualBlock(512 + 512, 256)
+        self.dec2 = ResidualBlock(256 +256, 128)
+        self.dec1 = ResidualBlock(128 + 128, 64)
+        self.dec0 = ResidualBlock(64+ 64, 64)
+
+        # Bottleneck
+        self.bottleneck = ResidualBlock(512, 512)
+
+        # Final output
+        self.final_conv = nn.Conv2d(64, output_channels, kernel_size=1)
+
+        # Max pooling and upsampling
+        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.upsample = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+
+    def forward(self, x):
+        # Encoder
+        enc1 = self.enc1(x)
+        enc2 = self.enc2(self.pool(enc1))
+        enc3 = self.enc3(self.pool(enc2))
+        enc4 = self.enc4(self.pool(enc3))
+
+        # Bottleneck
+        bottleneck = self.bottleneck(self.pool(enc4))
+
+        # Decoder
+        dec3 = self.dec3(torch.cat([self.upsample(bottleneck), enc4], dim=1))
+        dec2 = self.dec2(torch.cat([self.upsample(dec3), enc3], dim=1))
+        dec1 = self.dec1(torch.cat([self.upsample(dec2), enc2], dim=1))
+        dec0 = self.dec0(torch.cat([self.upsample(dec1), enc1], dim=1))
+
+        # Final output
+        out = self.final_conv(dec0)
+        return out
 
 
 class UNet(nn.Module):
@@ -90,7 +156,7 @@ class UNet(nn.Module):
             x = torch.randn(128,self.input_channels,32,32)
             print(self.forward(x).std())
 
-        
+
 
 
 
@@ -147,7 +213,7 @@ class MixNet(nn.Module):
 class Denoiser(nn.Module):
     def __init__(self,noisy_input_channels, output_channels, depth = 3):
         super(Denoiser, self).__init__()
-        self.unet_res = UNet_Res(noisy_input_channels,output_channels, depth = depth)
+        self.unet_res = ResidualUNet()#UNet_Res(noisy_input_channels,output_channels, depth = depth)
     def forward(self,x):
         x = self.unet_res(x)
         return x
