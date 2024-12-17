@@ -19,7 +19,7 @@ sigmas = torch.linspace(1,0.4,1000)**2
 
 def forward(data, model, sigmas_batch = None):
     im = data
-    #im =( im-im.mean(dim=(1,2,3))[:,None,None,None])/im.std(dim=(1,2,3))[:,None,None,None]
+    im =( im-im.mean(dim=(1,2,3))[:,None,None,None])/im.std(dim=(1,2,3))[:,None,None,None]
 
     # parameters of the langevin dynamics steps
     ind_randoms= torch.randint(0, sigmas.shape[0], (data.shape[0],), device = data.device)
@@ -41,7 +41,7 @@ def forward(data, model, sigmas_batch = None):
 
     score = -torch.sqrt(sigmas_batch[:,None,None,None])*noise_in/sigmas_batch[:,None,None,None]
     square_norm = torch.sum((pred_score -score)**2,(1,2,3)) # square norm of loss per image
-    loss = torch.sum(sigmas_batch**2*square_norm)
+    loss = torch.sum(square_norm)
     return loss, im_input, im_corrected, pred_score
 
 
@@ -97,10 +97,9 @@ def test(model, device, test_loader):
 
 def sampleLangevin(model,device, im_shape, epsilon = 0.01, T=1, temp = 1.):
     with torch.no_grad():
-    #if True:
         xt = torch.randn(im_shape, device = device)
         for i in range(0,sigmas.shape[0]):
-            mtemp = temp# - (i/1300)**2
+            mtemp = temp - (i/1300)**2
             sigmai = sigmas[i]
             alphai = epsilon#*sigmai
             for t in range(T):
@@ -108,7 +107,8 @@ def sampleLangevin(model,device, im_shape, epsilon = 0.01, T=1, temp = 1.):
                 pred_score= model(xt).detach()
 
                 xt = xt + alphai/2*pred_score/mtemp+math.sqrt(alphai)*zt
-                #xt = (xt-xt.mean(dim = (1,2,3))[:,None,None,None])/xt.std(dim=(1,2,3))[:,None,None,None]
+                xt = xt-xt.mean(dim=(1,2,3))[:,None,None,None]/xt.std(dim=(1,2,3))[:,None,None,None]
+                
             print(mtemp, torch.std(xt), torch.mean(xt))
 
     print("images generated ! ")
