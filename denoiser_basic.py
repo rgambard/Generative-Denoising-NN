@@ -12,15 +12,13 @@ from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR
 
 
-#sigmas = torch.pow(torch.ones(20)*0.8,torch.arange(20))
+# the sigmas in the training loop
 sigmas = torch.linspace(1,0.01,1000)
-#sigmas = torch.ones(1000)
 
-
+# forward pass to compute score
 def forward(data, model, sigmas_batch = None):
     im = data
 
-    # parameters of the langevin dynamics steps
     ind_randoms= torch.randint(0, sigmas.shape[0], (data.shape[0],), device = data.device)
     
     noise_in = torch.randn_like(im)
@@ -28,20 +26,13 @@ def forward(data, model, sigmas_batch = None):
         sigmas_batch = sigmas[ind_randoms]
 
         im_input = torch.sqrt(sigmas_batch[:,None,None,None])*noise_in+(torch.sqrt(1-sigmas_batch[:,None,None,None]))*im
-        #im =( im-im.mean(dim=(1,2,3)))/im.std(dim=(1,2,3))
     else :
         im_input = im
     
 
     mod_input = im_input
-    #pred_score = model(mod_input)
-    #inter_im = math.sqrt(2)*(im+im_input)
     pred_im = model(mod_input)
     tpred_im = 1/math.sqrt(2)*pred_im-im_input
-    #pred_im = (sqrt(sigmas_batch)+im)/s2
-    #tpred_im = model(mod_input)
-    # corrected image using the score expression
-    #im_corrected = 1/(torch.sqrt(1-sigmas_batch[:,None,None,None]))*(im_input+sigmas_batch[:,None,None,None]*pred_score)
     pred_score = -(im_input-torch.sqrt(1-sigmas_batch[:,None,None,None])*tpred_im)/sigmas_batch[:,None,None,None]
     im_corrected = tpred_im
 
@@ -99,7 +90,7 @@ def test(model, device, test_loader):
     gen_shape = list(im.shape)
     gen_shape[0] = 64
     gen_im = sampleLangevin(model, device, gen_shape)
-    save_image(gen_im, "im/generated.jpg")
+    save_image(gen_im, "im/generatedc.jpg")
 
 def sampleLangevin(model,device, im_shape, epsilon = 0.01, T=1):
     with torch.no_grad():
@@ -122,11 +113,26 @@ def sampleLangevin(model,device, im_shape, epsilon = 0.01, T=1):
 def main():
     global sigmas
     # Training settings
-    args_dict = {'batch_size' : 64, 'test_batch_size' :64, 'epochs' :1000, 'lr' : 0.0002, 'gamma' : 0.995, 'no_cuda' :False, 'dry_run':False, 'seed': 1, 'log_interval' : 200, 'save_model' :True, 'only_test':False, 'model_path':"denoisermnist_b.pt", 'load_model_from_disk':False, 'dataset':"MNIST", 'test':False}
+    args_dict = {'batch_size' : 64, 'test_batch_size' :64, 'epochs' :1000, 'lr' : 0.0002, 'gamma' : 0.995, 'no_cuda' :False, 'dry_run':False, 'seed': 1, 'log_interval' : 200, 'save_model' :True, 'only_test':False, 'model_path':"denoisercelebab.pt", 'load_model_from_disk':False, 'dataset':"CELEBA", 'test':False}
     args = dotdict(args_dict)
+    parser = argparse.ArgumentParser(description="A simple argument parser example.")
+
+    # Add arguments
+    parser.add_argument('--dataset', type=str, required=True, help='Dataset can be one of MNIST, CIFAR, CELEBA')
+    parser.add_argument('--test', type= str, required = False, help='wether to only test a model, requires path to the testing weights')
+
+    # Parse the arguments
+    margs = parser.parse_args()
+    args.dataset = margs.dataset
+    if margs.test is not None:
+        print("TEST")
+        args.test = True
+        print(args.test)
+        args.model_path = margs.test
+
     if args.test:
-        args_dict['load_model_from_disk'] = True
-        args_dict['only_test'] = True
+        args.load_model_from_disk = True
+        args.only_test = True
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
     torch.manual_seed(args.seed)
@@ -156,6 +162,16 @@ def main():
 
         dataset1 = datasets.CIFAR10(root='data/', train=True, download=True, transform=transform)
         dataset2 = datasets.CIFAR10(root='data/', train=False, download=True, transform=transform)
+        train_loader = torch.utils.data.DataLoader(dataset1,**train_kwargs)
+        test_loader = torch.utils.data.DataLoader(dataset2, **test_kwargs)
+        model = Denoiser(3,3).to(device)
+    elif dataset == "CELEBA":
+        transform = transforms.Compose([transforms.Resize((64,64)),
+                        transforms.ToTensor(),
+                        transforms.Normalize(mean=[0.5, 0.5, 0.5],
+                        std=[0.5, 0.5, 0.5])])
+        dataset1 = datasets.CelebA("./data/celeba", split = 'train',download=False, transform=transform)
+        dataset2 = datasets.CelebA("./data/celeba", split = 'test', download=False, transform=transform)
         train_loader = torch.utils.data.DataLoader(dataset1,**train_kwargs)
         test_loader = torch.utils.data.DataLoader(dataset2, **test_kwargs)
         model = Denoiser(3,3).to(device)
