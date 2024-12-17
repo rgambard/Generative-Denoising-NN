@@ -219,7 +219,7 @@ class UNet(nn.Module):
 class Denoiser(nn.Module):
     def __init__(self,noisy_input_channels, output_channels, depth = 3):
         super(Denoiser, self).__init__()
-        self.unet_res = UNet_Res(noisy_input_channels,output_channels, depth = depth)
+        self.unet_res =ResidualUNet(noisy_input_channels,output_channels)
     def forward(self,x):
         x = self.unet_res(x)
         return x
