@@ -10,34 +10,34 @@ from torch.optim.lr_scheduler import StepLR
 class UNet_Res(nn.Module):
     def __init__(self,input_channels, output_channels, depth = 3, int_channels = 32):
         super(UNet_Res, self).__init__()
-        #self.unetin = UNet(input_channels, int_channels, int_channels = int_channels)
-        #self.unetout = UNet(int_channels, output_channels, int_channels = int_channels)
-        #self.unets = nn.ModuleList([UNet(int_channels, int_channels, int_channels=int_channels) for i in range(depth)])
-        self.unetin = ResidualUNet(3,int_channels)
-        self.unets = nn.ModuleList([ResidualUNet(int_channels, int_channels) for i in range(depth)])
-        self.unetout = ResidualUNet(int_channels,3)
+        self.unetin = UNet(input_channels, int_channels, int_channels = int_channels)
+        self.unetout = UNet(int_channels, output_channels, int_channels = int_channels)
+        self.unets = nn.ModuleList([UNet(int_channels, int_channels, int_channels=int_channels) for i in range(depth)])
+        #self.unetin = ResidualUNet(3,int_channels)
+        #self.unets = nn.ModuleList([ResidualUNet(int_channels, int_channels) for i in range(depth)])
+        #self.unetout = ResidualUNet(int_channels,3)
 
     def forward(self,x):
         x = self.unetin(x)
         i = 1
         for unet in self.unets:
-            #res_input = (x-x.mean(dim=(1,2,3))[:,None,None,None])/x.std(dim=(1,2,3))[:,None,None,None]
+            res_input = (x-x.mean(dim=(1,2,3))[:,None,None,None])/x.std(dim=(1,2,3))[:,None,None,None]
             res_input = x
             res_output = unet(res_input)
             x = x+res_output
             i+=1
-        #x = (x-x.mean(dim=(1,2,3))[:,None,None,None])/x.std(dim=(1,2,3))[:,None,None,None]
+        x = (x-x.mean(dim=(1,2,3))[:,None,None,None])/x.std(dim=(1,2,3))[:,None,None,None]
         x = self.unetout(x)
         return x
 
 class ResidualBlock(nn.Module):
-    def __init__(self, in_channels, out_channels):
+    def __init__(self, in_channels, out_channels, bn = True):
         super(ResidualBlock, self).__init__()
         self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(out_channels)
+        self.bn1 = nn.BatchNorm2d(out_channels) if bn else nn.Identity()
         self.relu = nn.ReLU(inplace=True)
         self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False)
-        self.bn2 = nn.BatchNorm2d(out_channels)
+        self.bn2 = nn.BatchNorm2d(out_channels) if bn else nn.Identity()
         self.skip = nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=False) if in_channels != out_channels else nn.Identity()
 
     def forward(self, x):
@@ -45,6 +45,32 @@ class ResidualBlock(nn.Module):
         x = self.relu(self.bn1(self.conv1(x)))
         x = self.bn2(self.conv2(x))
         return self.relu(x + residual)
+
+class ResidualEnergy(nn.Module):
+    def __init__(self, input_channels=3):
+        super(ResidualEnergy, self).__init__()
+
+        # Encoder
+        self.enc1 = ResidualBlock(input_channels, 64, bn=True) # 64x32x32
+        self.enc2 = ResidualBlock(64, 128, bn=True) # 128x16x16
+
+        self.enc3 = ResidualBlock(128, 256, bn=True) # 256x8x8
+        self.enc4 = ResidualBlock(256, 512, bn=True) # 512x4x4
+
+
+        # Max pooling and upsampling
+        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
+
+    def forward(self, x):
+        # Encoder
+        enc1 = self.enc1(x)
+        enc2 = self.enc2(self.pool(enc1))
+        enc3 = self.enc3(self.pool(enc2))
+        enc4 = self.enc4(self.pool(enc3))
+        # Final output
+        out = torch.sum(enc4,dim=(2,3))
+        return out
+
 
 
 class ResidualUNet(nn.Module):
@@ -55,16 +81,16 @@ class ResidualUNet(nn.Module):
         self.enc1 = ResidualBlock(input_channels, 64)
         self.enc2 = ResidualBlock(64, 128)
         self.enc3 = ResidualBlock(128, 256)
-        self.enc4 = ResidualBlock(256, 512)
+        self.enc4 = ResidualBlock(256, 256)
 
         # Decoder
-        self.dec3 = ResidualBlock(512 + 512, 256)
+        self.dec3 = ResidualBlock(256+256, 256)
         self.dec2 = ResidualBlock(256 +256, 128)
         self.dec1 = ResidualBlock(128 + 128, 64)
         self.dec0 = ResidualBlock(64+ 64, 64)
 
         # Bottleneck
-        self.bottleneck = ResidualBlock(512, 512)
+        self.bottleneck = ResidualBlock(256,256)
 
         # Final output
         self.final_conv = nn.Conv2d(64, output_channels, kernel_size=1)
@@ -101,13 +127,17 @@ class UNet(nn.Module):
         self.conv11 = nn.Conv2d(input_channels,int_channels, 3, 1, 1) # kernel, stride, padding
         self.conv12 = nn.Conv2d(int_channels, int_channels, 3, 1, 1)
         self.conv13 = nn.Conv2d(int_channels, int_channels, 3, 1, 1)
-        self.conv21 = nn.Conv2d(int_channels, int_channels, 3, 1, 1)
-        self.conv22 = nn.Conv2d(int_channels,int_channels, 3, 1, 1)
-        self.conv31 = nn.Conv2d(int_channels,int_channels, 3, 1, 1)
-        self.conv32 = nn.Conv2d(int_channels,int_channels, 3, 1, 1)
-        self.conv33 = nn.Conv2d(int_channels,int_channels, 3, 1, 1)
-        self.convu21 = nn.Conv2d(int_channels,int_channels, 3, 1, 1)
-        self.convu22 = nn.Conv2d(int_channels,int_channels, 3, 1, 1)
+        self.conv21 = nn.Conv2d(int_channels, 2*int_channels, 3, 1, 1)
+        self.conv22 = nn.Conv2d(2*int_channels,2*int_channels, 3, 1, 1)
+        self.conv31 = nn.Conv2d(2*int_channels,4*int_channels, 3, 1, 1)
+        self.conv32 = nn.Conv2d(4*int_channels,4*int_channels, 3, 1, 1)
+        self.conv33 = nn.Conv2d(4*int_channels,4*int_channels, 3, 1, 1)
+        self.conv41 = nn.Conv2d(4*int_channels,8*int_channels, 3, 1, 1)
+        self.conv42 = nn.Conv2d(8*int_channels,4*int_channels, 3, 1, 1)
+        self.convu31 = nn.Conv2d(4*int_channels,4*int_channels, 3, 1, 1)
+        self.convu32 = nn.Conv2d(4*int_channels,2*int_channels, 3, 1, 1)
+        self.convu21 = nn.Conv2d(2*int_channels,2*int_channels, 3, 1, 1)
+        self.convu22 = nn.Conv2d(2*int_channels,int_channels, 3, 1, 1)
         self.convu11 = nn.Conv2d(int_channels,int_channels, 3, 1, 1)
         self.convu12 = nn.Conv2d(int_channels, int_channels, 3, 1, 1)
         self.convu13 = nn.Conv2d(int_channels, int_channels, 3, 1, 1)
@@ -185,47 +215,24 @@ class UNet(nn.Module):
         out = self.convout(xu14)
         return out
 
-class MixNet(nn.Module):
-    def __init__(self,int_channels =16):
-        super(ConvNet, self).__init__()
-        self.convl11 = nn.Conv2d(int_channels,int_channels, 3, 1, 1) # kernel, stride, padding
-        self.convl12 = nn.Conv2d(int_channels,int_channels, 3, 1, 1) # kernel, stride, padding
-        self.convl21 = nn.Conv2d(int_channels,int_channels, 3, 1, 1) # kernel, stride, padding
-        self.convl22 = nn.Conv2d(int_channels,int_channels, 3, 1, 1) # kernel, stride, padding
-        self.convl31 = nn.Conv2d(int_channels,int_channels, 3, 1, 1) # kernel, stride, padding
-        self.convl32 = nn.Conv2d(int_channels,int_channels, 3, 1, 1) # kernel, stride, padding
-        self.convl41 = nn.Conv2d(int_channels,int_channels, 3, 1, 1) # kernel, stride, padding
-        self.convl42 = nn.Conv2d(int_channels,int_channels, 3, 1, 1) # kernel, stride, padding
-
-    def mix(self,x,x1,x2,x3):
-        x1 += F.interpolate(x,x1.shape)
-        x2 += F.interpolate(x1,x2.shape)
-        x3 += F.interpolate(x2,x3.shape)
-        x4 += F.interpolate(x3,x4.shape)
-        pass
-    def forward(self, x, x1, x2, x3):
-        x += self.convl12(F.relu(self.conv11(x)))
-        x1 += self.convl22(F.relu(self.convl21(x1)))
-        x2 += self.convl31(F.relu(self.convl32(x2)))
-        x3 += self.convl41(F.relu(self.convl42(x3)))
-        return x, x1, x2, x3
 
 class Denoiser(nn.Module):
     def __init__(self,noisy_input_channels, output_channels, depth = 3):
         super(Denoiser, self).__init__()
-        self.unet_res = ResidualUNet()#UNet_Res(noisy_input_channels,output_channels, depth = depth)
+        self.unet_res = UNet_Res(noisy_input_channels,output_channels, depth = depth)
     def forward(self,x):
         x = self.unet_res(x)
         return x
 
+
 class EnergyModel(nn.Module):
     def __init__(self,noisy_input_channels, output_channels, depth = 10):
         super(EnergyModel, self).__init__()
-        self.unet_res = UNet_Res(noisy_input_channels, 1, depth = depth)
+        self.res=ResidualEnergy(noisy_input_channels)
         self.output_channels = output_channels
 
     def forward(self,samples):
         samples.requires_grad_(True)
-        logp = self.unet_res(samples)
+        logp = self.res(samples)
         dlogp = torch.autograd.grad(logp.sum(), samples, create_graph=True)[0]
         return dlogp[:,:self.output_channels,:,:]

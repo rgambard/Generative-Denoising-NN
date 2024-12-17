@@ -13,13 +13,13 @@ from torch.optim.lr_scheduler import StepLR
 
 
 #sigmas = torch.pow(torch.ones(20)*0.8,torch.arange(20))
-sigmas = torch.linspace(1,0.2,1000)
+sigmas = torch.linspace(1,0.4,1000)**2
 #sigmas = torch.ones(1000)
 
 
 def forward(data, model, sigmas_batch = None):
     im = data
-    im =( im-im.mean(dim=(1,2,3))[:,None,None,None])/im.std(dim=(1,2,3))[:,None,None,None]
+    #im =( im-im.mean(dim=(1,2,3))[:,None,None,None])/im.std(dim=(1,2,3))[:,None,None,None]
 
     # parameters of the langevin dynamics steps
     ind_randoms= torch.randint(0, sigmas.shape[0], (data.shape[0],), device = data.device)
@@ -100,7 +100,7 @@ def sampleLangevin(model,device, im_shape, epsilon = 0.01, T=1, temp = 1.):
     #if True:
         xt = torch.randn(im_shape, device = device)
         for i in range(0,sigmas.shape[0]):
-            mtemp = temp - (i/1300)**2
+            mtemp = temp# - (i/1300)**2
             sigmai = sigmas[i]
             alphai = epsilon#*sigmai
             for t in range(T):
@@ -108,7 +108,7 @@ def sampleLangevin(model,device, im_shape, epsilon = 0.01, T=1, temp = 1.):
                 pred_score= model(xt).detach()
 
                 xt = xt + alphai/2*pred_score/mtemp+math.sqrt(alphai)*zt
-                xt = (xt-xt.mean(dim = (1,2,3))[:,None,None,None])/xt.std(dim=(1,2,3))[:,None,None,None]
+                #xt = (xt-xt.mean(dim = (1,2,3))[:,None,None,None])/xt.std(dim=(1,2,3))[:,None,None,None]
             print(mtemp, torch.std(xt), torch.mean(xt))
 
     print("images generated ! ")
@@ -144,20 +144,37 @@ def main():
         train_kwargs.update(cuda_kwargs)
         test_kwargs.update(cuda_kwargs)
 
-    # loading dataset
-    transform=transforms.Compose([
+    dataset = "MNIST"
+    if dataset == "CIFAR":
+        transform = transforms.Compose([
+        transforms.Resize((32,32)),
         transforms.ToTensor(),
-        transforms.Pad(2),
-        transforms.Normalize((0.1307,), (0.3081,))
-    ])
-    dataset1 = datasets.MNIST('../data', train=True, download=True,
-    transform=transform)
-    dataset2 = datasets.MNIST('../data', train=False,
-    transform=transform)
-    train_loader = torch.utils.data.DataLoader(dataset1,**train_kwargs)
-    test_loader = torch.utils.data.DataLoader(dataset2, **test_kwargs)
+        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.247, 0.243, 0.261)),#mean, std
+        transforms.RandomHorizontalFlip(p=0.5)
+        ])
 
-    model = ResidualUNet(1,1).to(device)
+        dataset1 = datasets.CIFAR10(root='data/', train=True, download=True, transform=transform)
+        dataset2 = datasets.CIFAR10(root='data/', train=False, download=True, transform=transform)
+        train_loader = torch.utils.data.DataLoader(dataset1,**train_kwargs)
+        test_loader = torch.utils.data.DataLoader(dataset2, **test_kwargs)
+        model = Denoiser(3,3,1).to(device)
+
+    elif dataset=="MNIST":
+        # loading dataset
+        transform=transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Pad(2),
+            transforms.Normalize((0.1307,), (0.3081,))
+        ])
+        dataset1 = datasets.MNIST('../data', train=True, download=True,
+        transform=transform)
+        dataset2 = datasets.MNIST('../data', train=False,
+        transform=transform)
+        train_loader = torch.utils.data.DataLoader(dataset1,**train_kwargs)
+        test_loader = torch.utils.data.DataLoader(dataset2, **test_kwargs)
+
+        model = ResidualUNet(1,1).to(device)
+
     if args.load_model_from_disk:
         model.load_state_dict(torch.load(args.model_path, weights_only= True))
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
