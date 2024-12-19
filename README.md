@@ -1,4 +1,5 @@
-Rrepository created for a project for the course "Probabilistic graphical models" from MVA master.
+Rrepository created for a project for the course "Probabilistic graphical models" from MVA master. It is a very simple implementation of [Generative Modeling by Estimating Gradients of the Data Distribution](https://arxiv.org/abs/1906.04537) using a single U-Net, and also modified to be more stable.
+
 
 
 The main file to run the code is denoiser_basic.py . The NCSN architecture is stored in Unet.py and weights were saved from our last attempts (  denoisercelebab.pt for CELEBA 64x64 and denoisercifar.pt for CIFAR10 ). The script could be run on test mode ( using the saved weights ) or training mode ( new weights calculated ).
